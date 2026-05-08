@@ -538,7 +538,7 @@ tr.sel-row td{background:rgba(108,99,255,.08)}
       <input type="date" id="fh-hasta" onchange="renderFHist()">
       <button class="btn b-grn btn-sm" onclick="imprimirHistorialFletes()">🖨 Imprimir</button>
       <button class="btn b-out btn-sm" onclick="resetearPagosFletes()">↩ Resetear pagos</button>
-      <button class="btn b-red btn-sm" onclick="if(confirm('¿Borrar historial?')){fHistorial=[];fsave();renderFHist();}">🗑 Limpiar</button>
+      <button class="btn b-red btn-sm" onclick="if(confirm('¿Borrar historial?')){fHistorial=[];fsave(); if(window._guardarFB) window._guardarFB();renderFHist();}">🗑 Limpiar</button>
     </div>
     <div class="rsm-bar" id="fh-rsm"></div>
     <div class="tw" style="margin-top:13px"><table>
@@ -676,7 +676,7 @@ tr.sel-row td{background:rgba(108,99,255,.08)}
       </select>
       <button class="btn b-grn btn-sm" onclick="imprimirHistorial()">🖨 Imprimir</button>
       <button class="btn b-out btn-sm" onclick="resetearPagosVentas()">↩ Resetear pagos</button>
-      <button class="btn b-red btn-sm" onclick="if(confirm('¿Borrar historial ventas?')){vHistorial=[];vsave();renderVHist();}">🗑 Limpiar</button>
+      <button class="btn b-red btn-sm" onclick="if(confirm('¿Borrar historial ventas?')){vHistorial=[];vsave(); if(window._guardarFB) window._guardarFB();renderVHist();}">🗑 Limpiar</button>
     </div>
     <div class="rsm-bar" id="vh-rsm"></div>
     <div class="tw" style="margin-top:13px"><table>
@@ -1558,7 +1558,7 @@ function confirmarFPago(){
   fHistorial.push({id:liqId,ts:Date.now(),fecha_pago:fecha,fletero:_pFlet,
     periodo_label:fmtR(fs[0],fs[fs.length-1]),desde:fs[0]||'',hasta:fs[fs.length-1]||'',
     cantidad:items.length,monto:items.reduce((s,e)=>s+e.monto,0),metodo:met,ref,notas});
-  fsave(); closeM('m-pago'); fClearSel(); actualizarFBadges();
+  fsave(); if(window._guardarFB) window._guardarFB(); closeM('m-pago'); fClearSel(); actualizarFBadges();
   if(document.getElementById('fp-liq').style.display!=='none') renderFLiq();
   if(document.getElementById('fp-fact').style.display!=='none') renderFFact();
   if(document.getElementById('fp-hist').style.display!=='none') renderFHist();
@@ -1656,7 +1656,7 @@ function imprimirHistorialFletes(){
 function resetearPagosFletes(){
   if(!confirm('¿Resetear TODOS los pagos de fletes del mes '+mesSel+'?\n\nEsto permite reliquidar. El historial no se borra.')) return;
   fPagos={};
-  fsave();
+  fsave(); if(window._guardarFB) window._guardarFB();
   renderFLiq();
   renderFHist();
   actualizarFBadges();
@@ -1757,10 +1757,10 @@ function marcarTodoFletero(fletero, val){
     if(val) fFactLiq[idStr]=true;
     else delete fFactLiq[idStr];
   });
-  fsave();
+  fsave(); if(window._guardarFB) window._guardarFB();
   renderFFact();
 }
-function toggleFLiq(id,v){if(v)fFactLiq[String(id)]=true;else delete fFactLiq[String(id)];fsave();renderFFact();}
+function toggleFLiq(id,v){if(v)fFactLiq[String(id)]=true;else delete fFactLiq[String(id)];fsave(); if(window._guardarFB) window._guardarFB();renderFFact();}
 
 // ─ HISTORIAL FLETES ─
 function renderFHist(){
@@ -2020,7 +2020,7 @@ function editarMonteFlete(id, montoActual){
   const val=Math.round(parseFloat(nuevo));
   if(isNaN(val)||val<0){ alert('Valor inválido'); return; }
   fMontoEdit[id]=val;
-  fsave();
+  fsave(); if(window._guardarFB) window._guardarFB();
   const span=document.getElementById('fmonto-val-'+id);
   if(span) span.textContent=fmt(val);
   actualizarFBarra();
@@ -2031,7 +2031,7 @@ function editarMonteFlete(id, montoActual){
 function resetearPagosVentas(){
   if(!confirm('¿Resetear TODOS los pagos de ventas del mes '+mesSel+'?\n\nEsto borra los pagos registrados para que puedas reliquidar.\nEl historial NO se borra — usalo para saber qué se pagó.')) return;
   vPagos={};
-  vsave();
+  vsave(); if(window._guardarFB) window._guardarFB();
   renderVLiq();
   renderVHist();
   actualizarVBadges();
@@ -2042,7 +2042,7 @@ function desmarcarQ2(){
   const D=getVentas();
   const q2ids=D.filter(e=>e.quincena==='Q2').map(e=>e.id);
   q2ids.forEach(id=>{delete vPagos[id];});
-  vsave();
+  vsave(); if(window._guardarFB) window._guardarFB();
   renderVLiq();
   actualizarVBadges();
   alert('Q2 desmarcado. Podés volver a liquidar la 2ª quincena.');
@@ -2054,7 +2054,7 @@ function editarComision(id, comiActual){
   const val = Math.round(parseFloat(nueva));
   if(isNaN(val)){ alert('Valor inválido'); return; }
   vComiEdit[id] = val;
-  vsave();
+  vsave(); if(window._guardarFB) window._guardarFB();
   // Actualizar visual sin re-renderizar toda la tabla
   const span = document.getElementById('comi-val-'+id);
   if(span){
@@ -2200,7 +2200,7 @@ function confirmarVPago(){
     });
   });
 
-  vsave();closeM('m-pago');vClearSel();actualizarVBadges();renderVLiq();
+  vsave(); if(window._guardarFB) window._guardarFB();closeM('m-pago');vClearSel();actualizarVBadges();renderVLiq();
   // Mostrar recibo con una card por vendedora
   abrirReciboVent(items,_vpVend,met,'','');
 }
