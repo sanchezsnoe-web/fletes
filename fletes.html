@@ -52,6 +52,7 @@ async function guardarFB(){
         fHist: JSON.parse(localStorage.getItem('fg6_f_hist_'+m)||'[]'),
         fFliq: JSON.parse(localStorage.getItem('fg6_f_fliq_'+m)||'{}'),
         fMont: JSON.parse(localStorage.getItem('fg6_f_mont_'+m)||'{}'),
+        fPendPrev: JSON.parse(localStorage.getItem('fg6_f_pag_pendprev_'+m)||'{}'),
         vExt:  JSON.parse(localStorage.getItem('fg6_v_ext_'+m) ||'[]'),
         vPag:  JSON.parse(localStorage.getItem('fg6_v_pag_'+m) ||'{}'),
         vHist: JSON.parse(localStorage.getItem('fg6_v_hist_'+m)||'[]'),
@@ -88,6 +89,7 @@ async function cargarFB(){
       if(d.vHist) localStorage.setItem('fg6_v_hist_'+m, JSON.stringify(d.vHist));
       if(d.vComi) localStorage.setItem('fg6_v_ced_'+m,  JSON.stringify(d.vComi));
       if(d.todos) localStorage.setItem('fg6_todos_extra_'+m, JSON.stringify(d.todos));
+      if(d.fPendPrev) localStorage.setItem('fg6_f_pag_pendprev_'+m, JSON.stringify(d.fPendPrev));
     }
     setEstadoFB('online');
     return true;
@@ -128,10 +130,21 @@ window._cargarFB=cargarFB;
 window._setEstadoFB=setEstadoFB;
 
 // Cargar datos al iniciar
-document.addEventListener('DOMContentLoaded',async()=>{
-  const ok=await cargarFB();
-  if(ok && window._recargarApp) window._recargarApp();
-});
+// Cargar datos de Firebase y luego inicializar la app
+async function iniciarConFB(){
+  const ok = await cargarFB();
+  // Señalar que FB cargó - la app principal lo está esperando
+  window._fbCargado = true;
+  window._fbTeniaDatos = ok;
+  // Si la app ya terminó de definirse, recargar
+  if(window._recargarApp) window._recargarApp();
+}
+// Iniciar cuando el DOM esté listo
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded', iniciarConFB);
+} else {
+  iniciarConFB();
+}
 </script>
 
 
@@ -512,6 +525,24 @@ tr.sel-row td{background:rgba(108,99,255,.08)}
       </tr></thead>
       <tbody id="fl-tbody"></tbody>
     </table></div>
+
+    <!-- PENDIENTES MES ANTERIOR -->
+    <div id="fl-pendientes-wrap" style="margin-top:18px;display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-weight:700;color:var(--acc2)">⏳ Pendientes del mes anterior</span>
+        <span id="fl-pend-count" style="font-size:.75rem;color:var(--txt2)"></span>
+        <button class="btn b-out btn-sm" onclick="fSelTodosPendientes()">Seleccionar todos</button>
+        <button class="btn b-acc btn-sm" onclick="abrirFPagoPendientes()">Pagar seleccionados</button>
+      </div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th style="width:30px"><input type="checkbox" id="fl-pend-chkall" onchange="fToggleAllPend(this)"></th>
+          <th>Fecha</th><th>N°</th><th>Cliente</th><th>Localidad</th>
+          <th>Fletero</th><th>Tipo</th><th>Paquetes</th><th>Monto</th><th>Estado</th>
+        </tr></thead>
+        <tbody id="fl-pend-tbody"></tbody>
+      </table></div>
+    </div>
   </div>
 
   <!-- F: FACTURACIÓN -->
@@ -967,7 +998,7 @@ function showFTab(name){
     document.getElementById('fp-'+n).style.display=n===name?'block':'none';
     document.getElementById('ftab-'+n).classList.toggle('active',n===name);
   });
-  if(name==='liq') renderFLiq();
+  if(name==='liq'){ renderFLiq(); renderFPendientes(); }
   if(name==='fact') renderFFact();
   if(name==='hist') renderFHist();
   if(name==='imprimir') renderFImp();
@@ -1475,6 +1506,173 @@ function renderFLiq(){
   actualizarFBarra();
 }
 
+
+// ══════════════════════════════════════════════════
+// PENDIENTES MES ANTERIOR - FLETES
+// ══════════════════════════════════════════════════
+
+let fPendSel = new Set(); // IDs seleccionados de pendientes (formato "mesAnterior|id")
+
+function getMesAnterior(){
+  const [y,m] = mesSel.split('-').map(Number);
+  const prev = m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,'0')}`;
+  return prev;
+}
+
+function getFleterosPendientesMesAnterior(){
+  const mesAnt = getMesAnterior();
+  // Fletes del mes anterior
+  const extAnt = JSON.parse(localStorage.getItem('fg6_f_ext_'+mesAnt)||'[]');
+  const pagosAnt = JSON.parse(localStorage.getItem('fg6_f_pag_'+mesAnt)||'{}');
+  // Pagos del mes anterior ya liquidados en el mes ACTUAL (guardados aparte)
+  const pagadosEnActual = JSON.parse(localStorage.getItem('fg6_f_pag_pendprev_'+mesSel)||'{}');
+  
+  // Filtrar: solo los que no tienen pago en mes anterior Y no tienen pago en actual
+  return extAnt
+    .filter(e => !pagosAnt[e.id] && !pagadosEnActual[e.id])
+    .map(e => ({...e, _mesOrigen: mesAnt, _keyPago: e.id}));
+}
+
+function renderFPendientes(){
+  const items = getFleterosPendientesMesAnterior();
+  const wrap = document.getElementById('fl-pendientes-wrap');
+  const tbody = document.getElementById('fl-pend-tbody');
+  const count = document.getElementById('fl-pend-count');
+  
+  if(!items.length){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  count.textContent = `${items.length} viajes · $${fmt(items.reduce((s,e)=>s+e.monto,0))} pendiente`;
+  
+  const TPILL={market:'<span class="pill p-mk" style="font-size:.65rem">Market</span>',flex:'<span class="pill p-fl" style="font-size:.65rem">Flex</span>',redes:'<span class="pill p-rd" style="font-size:.65rem">Redes</span>'};
+  tbody.innerHTML='';
+  items.forEach(e=>{
+    const key = e._mesOrigen+'|'+e.id;
+    const isSel = fPendSel.has(key);
+    const col = fCol(e.repartidor);
+    const tr = document.createElement('tr');
+    if(isSel) tr.classList.add('sel-row');
+    tr.innerHTML=`
+      <td><input type="checkbox" data-key="${key}" ${isSel?'checked':''} onchange="fTogglePend('${key}',this.checked)"></td>
+      <td>${fmtF(e.fecha)}</td>
+      <td style="color:var(--acc2)">${e.numero||'—'}</td>
+      <td>${e.cliente}</td>
+      <td style="color:var(--txt2);font-size:.78rem">${e.localidad}</td>
+      <td><span style="font-weight:700;color:${col}">${e.repartidor}</span></td>
+      <td>${TPILL[e.tipo]||''}</td>
+      <td style="text-align:center;color:var(--txt2)">${e.cant||0}</td>
+      <td style="font-weight:700">${fmt(e.monto)}</td>
+      <td><span style="color:var(--red);font-size:.78rem">Pendiente de ${getMesNombre(e._mesOrigen)}</span></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function getMesNombre(mesStr){
+  const NM={'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio','07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
+  const [y,m] = mesStr.split('-');
+  return (NM[m]||m)+' '+y;
+}
+
+function fTogglePend(key, checked){
+  if(checked) fPendSel.add(key); else fPendSel.delete(key);
+  renderFPendientes();
+}
+
+function fToggleAllPend(chk){
+  const items = getFleterosPendientesMesAnterior();
+  items.forEach(e=>{
+    const key = e._mesOrigen+'|'+e.id;
+    if(chk.checked) fPendSel.add(key); else fPendSel.delete(key);
+  });
+  renderFPendientes();
+}
+
+function fSelTodosPendientes(){
+  const items = getFleterosPendientesMesAnterior();
+  items.forEach(e => fPendSel.add(e._mesOrigen+'|'+e.id));
+  renderFPendientes();
+}
+
+function abrirFPagoPendientes(){
+  if(!fPendSel.size){ alert('Seleccioná al menos un viaje pendiente'); return; }
+  const items = getFleterosPendientesMesAnterior();
+  const selItems = items.filter(e => fPendSel.has(e._mesOrigen+'|'+e.id));
+  const repartidores = [...new Set(selItems.map(e=>e.repartidor))];
+  const repartidor = repartidores.length===1 ? repartidores[0] : 'Varios';
+  const total = selItems.reduce((s,e)=>s+e.monto,0);
+  
+  window._pendPagoItems = selItems;
+  
+  // Preparar modal de pago
+  document.getElementById('mp-tit').textContent = `Pendientes ${getMesNombre(selItems[0]._mesOrigen)} — ${repartidor}`;
+  document.getElementById('mp-det').innerHTML = `<div style="color:var(--txt2);font-size:.85rem">${selItems.length} viajes · <strong style="color:var(--acc2)">${fmt(total)}</strong></div>`;
+  document.getElementById('mp-monto').value = total;
+  document.getElementById('mp-fecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('mp-met').value = 'efectivo';
+  document.getElementById('mp-ref').value = '';
+  document.getElementById('mp-notas').value = '';
+  document.getElementById('mp-confirm-btn').onclick = confirmarFPagoPendientes;
+  openM('m-pago');
+}
+
+function confirmarFPagoPendientes(){
+  const met = document.getElementById('mp-met').value;
+  const fecha = document.getElementById('mp-fecha').value;
+  const ref = document.getElementById('mp-ref').value;
+  const notas = document.getElementById('mp-notas').value;
+  if(!fecha){ alert('Ingresá la fecha de pago'); return; }
+  registrarFPagoPendientes(met, ref, notas, fecha);
+}
+
+function registrarFPagoPendientes(met, ref, notas, fecha){
+  const items = window._pendPagoItems || [];
+  if(!items.length) return;
+  
+  const mesAnt = getMesAnterior();
+  const pagadosEnActual = JSON.parse(localStorage.getItem('fg6_f_pag_pendprev_'+mesSel)||'{}');
+  
+  items.forEach(e => {
+    pagadosEnActual[e.id] = {
+      metodo: met, ref, notas,
+      fecha: fecha || new Date().toISOString().slice(0,10),
+      monto: e.monto,
+      repartidor: e.repartidor,
+      mesOrigen: e._mesOrigen
+    };
+  });
+  
+  localStorage.setItem('fg6_f_pag_pendprev_'+mesSel, JSON.stringify(pagadosEnActual));
+  
+  // Agregar al historial del mes actual
+  const repartidores = [...new Set(items.map(e=>e.repartidor))];
+  repartidores.forEach(repartidor => {
+    const rItems = items.filter(e=>e.repartidor===repartidor);
+    fHistorial.push({
+      fecha: new Date().toISOString().slice(0,10),
+      repartidor,
+      ids: rItems.map(e=>e.id),
+      cantidad: rItems.length,
+      monto: rItems.reduce((s,e)=>s+e.monto,0),
+      metodo: met, ref, notas,
+      esPendienteMesAnt: true,
+      mesOrigen: mesAnt
+    });
+  });
+  
+  fsave(); if(window._guardarFB) window._guardarFB();
+  
+  // También guardar en Firebase la clave pendprev
+  if(window._guardarFBPendprev) window._guardarFBPendprev(mesSel, pagadosEnActual);
+  
+  fPendSel.clear();
+  window._pendPagoModo = false;
+  window._pendPagoItems = [];
+  closeM('m-pago');
+  renderFPendientes();
+  renderFHist();
+  actualizarFBadges();
+  alert(`✓ Pendientes pagados y registrados en historial de ${getMesNombre(mesSel)}`);
+}
+
 function fToggleSel(id,checked){
   if(checked)fSel.add(id);else fSel.delete(id);
   actualizarFBarra();
@@ -1559,7 +1757,7 @@ function confirmarFPago(){
     periodo_label:fmtR(fs[0],fs[fs.length-1]),desde:fs[0]||'',hasta:fs[fs.length-1]||'',
     cantidad:items.length,monto:items.reduce((s,e)=>s+e.monto,0),metodo:met,ref,notas});
   fsave(); if(window._guardarFB) window._guardarFB(); closeM('m-pago'); fClearSel(); actualizarFBadges();
-  if(document.getElementById('fp-liq').style.display!=='none') renderFLiq();
+  if(document.getElementById('fp-liq').style.display!=='none'){ renderFLiq(); renderFPendientes(); }
   if(document.getElementById('fp-fact').style.display!=='none') renderFFact();
   if(document.getElementById('fp-hist').style.display!=='none') renderFHist();
   // Recibo
@@ -2908,18 +3106,7 @@ function cambiarMes(mes){
 }
 
 // ── Auto-init: detectar versión y último mes usado ──
-const APP_VER = '73';
-const storedVer = localStorage.getItem('fg6_app_ver');
-if(storedVer && storedVer !== APP_VER){
-  // Nueva versión del archivo: limpiar solo extras/cache, conservar pagos e historial
-  // (pagos e historial son los datos importantes que el usuario generó)
-  Object.keys(localStorage).filter(k=>
-    k.startsWith('fg6_f_ext_') ||
-    k.startsWith('fg6_v_ext_') ||
-    k.startsWith('fg6_todos_extra_')
-  ).forEach(k=>localStorage.removeItem(k));
-}
-localStorage.setItem('fg6_app_ver', APP_VER);
+// Sin borrado automático — los datos del usuario nunca se tocan al actualizar el archivo
 
 // ── Función para recargar app con datos nuevos del Firebase ──
 window._recargarApp = function(){
@@ -2939,22 +3126,34 @@ window._recargarApp = function(){
   setTimeout(()=>buildFGeneral(),100);
 };
 
-// Detectar el último mes que el usuario estaba viendo
-const lastMes = localStorage.getItem('fg6_last_mes');
-// Detectar si hay datos de algún mes distinto al seed
-const allMeses = getMeses();
-const startMes = (lastMes && allMeses.includes(lastMes)) ? lastMes :
-                 (allMeses.length > 0 ? allMeses[allMeses.length-1] : SEED_MES);
+// Inicializar app (espera a Firebase si está disponible)
+(async function iniciarApp(){
+  // Esperar a Firebase máx 4 segundos
+  await new Promise(resolve => {
+    if(window._fbCargado) { resolve(); return; }
+    let attempts = 0;
+    const check = setInterval(()=>{
+      attempts++;
+      if(window._fbCargado || attempts > 40){ clearInterval(check); resolve(); }
+    }, 100);
+  });
 
-cargarMes(startMes);
-getFleteros().forEach(f=>fCol(f));
-getVendedoras().forEach(v=>vCol(v));
-[...new Set(getTodos().map(e=>e.vendedor))].forEach(v=>vCol(v));
-poblarSelectorMes();
-rebuildAllSelects();
-actualizarFBadges();
-actualizarVBadges();
-setTimeout(()=>buildFGeneral(),100);
+  // Detectar el último mes que el usuario estaba viendo
+  const lastMes = localStorage.getItem('fg6_last_mes');
+  const allMeses = getMeses();
+  const startMes = (lastMes && allMeses.includes(lastMes)) ? lastMes :
+                   (allMeses.length > 0 ? allMeses[allMeses.length-1] : SEED_MES);
+
+  cargarMes(startMes);
+  getFleteros().forEach(f=>fCol(f));
+  getVendedoras().forEach(v=>vCol(v));
+  [...new Set(getTodos().map(e=>e.vendedor))].forEach(v=>vCol(v));
+  poblarSelectorMes();
+  rebuildAllSelects();
+  actualizarFBadges();
+  actualizarVBadges();
+  setTimeout(()=>buildFGeneral(),100);
+})();
 
 </script>
 </body></html>
